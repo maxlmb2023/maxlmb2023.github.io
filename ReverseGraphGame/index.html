@@ -1,0 +1,2045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>反转图 · Reverse Graph</title>
+<style>
+  :root {
+    --bg: #eef2f8;
+    --canvas-bg: #f6f9fd;
+    --grid-dot: #d7e0ec;
+    --ink: #1b2432;
+    --ink-soft: #5d6a7e;
+    --ink-faint: #8b97a9;
+    --line: #e2e8f1;
+    --card: rgba(255, 255, 255, 0.88);
+    --card-solid: #ffffff;
+    --blue: #2f6fed;
+    --blue-deep: #1f52bb;
+    --green: #16a86b;
+    --green-deep: #0d8a56;
+    --orange: #f0801f;
+    --gray-edge: #aab6c6;
+    --danger: #e0463c;
+    --shadow: 0 18px 44px -18px rgba(28, 44, 74, 0.28), 0 2px 8px rgba(28, 44, 74, 0.06);
+    --panel-w: 332px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  #board {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+  }
+  #board.panning { cursor: grabbing; }
+  #board.on-node { cursor: pointer; }
+
+  /* ---------------- 左上角标题 ---------------- */
+  .topbar {
+    position: fixed;
+    left: 22px;
+    top: 20px;
+    padding: 14px 18px 13px;
+    background: var(--card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    max-width: 300px;
+    pointer-events: none;
+  }
+  .topbar .kicker {
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    font-weight: 700;
+    color: var(--blue);
+    text-transform: uppercase;
+  }
+  .topbar h1 {
+    margin: 4px 0 0;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .topbar p {
+    margin: 5px 0 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+
+  /* ---------------- 图例（面板内） ---------------- */
+  .sw-dot { display: block; width: 12px; height: 12px; border-radius: 50%; }
+  .sw-dot.blue { background: var(--blue); }
+  .sw-dot.green { background: var(--green); box-shadow: 0 0 0 3px rgba(22, 168, 107, 0.16); }
+  .sw-line { display: block; width: 22px; height: 3px; border-radius: 2px; }
+  .sw-line.gray { background: var(--gray-edge); }
+  .sw-line.orange { background: var(--orange); }
+  .minilegend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+    padding: 0 18px 12px;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .minilegend > div { display: flex; align-items: center; gap: 6px; }
+  .minilegend .sw-dot { width: 9px; height: 9px; }
+  .minilegend .sw-line { width: 14px; height: 2.5px; }
+
+  /* ---------------- 缩放条 ---------------- */
+  .zoombar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 22px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 5px;
+    background: var(--card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    border-radius: 13px;
+    box-shadow: var(--shadow);
+  }
+  .zoombar button {
+    width: 34px;
+    height: 30px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.14s, color 0.14s;
+  }
+  .zoombar button:hover { background: #eef2f8; color: var(--ink); }
+  .zoombar .zoom-val {
+    min-width: 52px;
+    text-align: center;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+  }
+  .zoombar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
+  .zoombar button.fit { width: auto; padding: 0 11px; font-size: 12px; }
+
+  /* ---------------- 右侧浮窗 ---------------- */
+  .panel {
+    position: fixed;
+    right: 22px;
+    top: 20px;
+    bottom: 20px;
+    width: var(--panel-w);
+    display: flex;
+    flex-direction: column;
+    background: var(--card);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .panel-head {
+    padding: 16px 18px 13px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel-head .t {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .panel-head .s {
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 14px 18px 12px;
+  }
+  .stat {
+    padding: 10px 12px 9px;
+    border-radius: 12px;
+    background: #f4f7fc;
+    border: 1px solid #e8eef7;
+  }
+  .stat .k {
+    display: block;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .stat .v {
+    display: block;
+    margin-top: 3px;
+    font-size: 21px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  .stat.accent .v { color: var(--orange); }
+  .stat.done .v { color: var(--green); }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    padding: 0 18px 14px;
+  }
+  .btn {
+    flex: 1;
+    height: 38px;
+    border-radius: 11px;
+    border: 1px solid #dde5f0;
+    background: var(--card-solid);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: transform 0.1s, background 0.14s, border-color 0.14s, opacity 0.14s;
+  }
+  .btn:hover:not(:disabled) { background: #f5f8fd; border-color: #cfdaea; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.42; cursor: default; }
+  .btn kbd {
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: #eef2f8;
+    color: var(--ink-faint);
+    border: 1px solid #e2e8f1;
+  }
+  .btn.wide { flex: none; width: 100%; }
+  .btn.ghost { background: transparent; }
+
+  .divider {
+    height: 1px;
+    background: var(--line);
+    margin: 0 18px;
+  }
+
+  .hist-head {
+    padding: 13px 18px 9px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .hist-head .t {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+  }
+  .hist-head .c {
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .redo-hint {
+    margin: 0 18px 8px;
+    padding: 6px 10px;
+    border-radius: 9px;
+    background: #fff6e9;
+    border: 1px solid #f7e2c4;
+    color: #a86a13;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .redo-hint[hidden] { display: none; }
+
+  .warn {
+    margin: 0 18px 10px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: #fdecea;
+    border: 1px solid #f7cfcb;
+    color: #b4362c;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .warn[hidden] { display: none; }
+
+  .history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 12px 14px;
+    margin: 0;
+    list-style: none;
+    scrollbar-width: thin;
+    scrollbar-color: #cfdaea transparent;
+  }
+  .history::-webkit-scrollbar { width: 8px; }
+  .history::-webkit-scrollbar-thumb {
+    background: #d5dfec;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .history li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 10px;
+    animation: rowIn 0.22s ease-out;
+  }
+  .history li + li { margin-top: 1px; }
+  .history li .n {
+    width: 22px;
+    flex: none;
+    text-align: right;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-faint);
+  }
+  .history li .pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: #f4f7fc;
+    border: 1px solid #e8eef7;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+  }
+  .history li .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c3cddb;
+    flex: none;
+  }
+  .history li.last .pill {
+    background: #eaf1ff;
+    border-color: #d3e1ff;
+    color: var(--blue-deep);
+  }
+  .history li.last .dot { background: var(--blue); }
+  .history .empty {
+    padding: 26px 10px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.7;
+  }
+  @keyframes rowIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .panel-foot {
+    padding: 9px 18px 10px;
+    border-top: 1px solid var(--line);
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .panel-foot kbd {
+    font: inherit;
+    font-size: 10px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: #eef2f8;
+    border: 1px solid #e2e8f1;
+  }
+
+  /* ---------------- 提示条 / 通关卡 ---------------- */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 74px;
+    transform: translate(-50%, 8px);
+    padding: 9px 16px;
+    border-radius: 11px;
+    background: rgba(28, 44, 74, 0.9);
+    color: #fff;
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+    box-shadow: 0 12px 30px -12px rgba(20, 32, 54, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s, transform 0.22s;
+    z-index: 30;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  .win {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translate(-50%, 12px) scale(0.97);
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 13px 14px 13px 15px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--card-solid);
+    border: 1px solid #e6edf7;
+    border-radius: 16px;
+    box-shadow: 0 24px 54px -22px rgba(20, 40, 80, 0.38), 0 2px 10px rgba(20, 40, 80, 0.06);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.26s, transform 0.26s cubic-bezier(0.2, 1.2, 0.4, 1);
+    z-index: 25;
+  }
+  .win.show { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: auto; }
+  .win .mark {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 50%;
+    background: linear-gradient(140deg, #22c17d, #148f5e);
+    box-shadow: 0 10px 22px -8px rgba(22, 168, 107, 0.6);
+    position: relative;
+  }
+  .win .mark::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 47%;
+    width: 8px;
+    height: 14px;
+    border: solid #fff;
+    border-width: 0 3px 3px 0;
+    border-radius: 1px;
+    transform: translate(-50%, -55%) rotate(42deg);
+  }
+  .win .txt { flex: 1; min-width: 0; }
+  .win h2 { margin: 0; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; }
+  .win p { margin: 2px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+  .win .row { display: flex; gap: 8px; flex: none; }
+  .win .row .btn { flex: none; height: 34px; padding: 0 14px; font-size: 12.5px; }
+
+  /* ---------------- 确认弹窗 ---------------- */
+  .mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(23, 34, 54, 0.34);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s;
+    z-index: 40;
+  }
+  .mask.show { opacity: 1; pointer-events: auto; }
+  .mask .card {
+    width: 340px;
+    max-width: calc(100vw - 40px);
+    padding: 24px 24px 18px;
+    background: var(--card-solid);
+    border-radius: 18px;
+    box-shadow: 0 30px 70px -24px rgba(20, 40, 80, 0.5);
+    transform: scale(0.96);
+    transition: transform 0.18s;
+  }
+  .mask.show .card { transform: scale(1); }
+  .mask h3 { margin: 0 0 8px; font-size: 16px; }
+  .mask p {
+    margin: 0 0 18px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+  .mask p b { color: var(--danger); font-weight: 600; }
+  .mask .row { display: flex; gap: 8px; }
+  .btn.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
+  .btn.danger:hover:not(:disabled) { background: #cc3b32; border-color: #cc3b32; }
+
+  /* ---------------- 标题卡里的帮助按钮 ---------------- */
+  .tb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .help-btn {
+    pointer-events: auto;
+    flex: none;
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: #f4f7fc;
+    border: 1px solid #e4eaf3;
+    border-radius: 999px;
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: background 0.14s, color 0.14s, border-color 0.14s;
+  }
+  .help-btn:hover { background: #eaf1fb; color: var(--blue); border-color: #cfdff8; }
+
+  /* ---------------- 玩法说明 ---------------- */
+  .mask .card.tut-card {
+    width: 528px;
+    max-width: calc(100vw - 32px);
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 22px 26px 20px;
+    border-radius: 20px;
+  }
+  .tut-kicker {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--blue);
+  }
+  .tut-card h2 {
+    margin: 4px 0 6px;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+  }
+  .tut-lead {
+    margin: 0 0 6px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+  .tut-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 6px 0 2px;
+  }
+  .tut-list {
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+  }
+  .tut-list li {
+    display: flex;
+    gap: 9px;
+    font-size: 12.5px;
+    line-height: 1.62;
+    color: var(--ink-soft);
+  }
+  .tut-list li b { color: var(--ink); font-weight: 600; }
+  .tut-list .num {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    border-radius: 50%;
+    background: #eef3fb;
+    color: var(--blue);
+    font-size: 10.5px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tut-list kbd, .tut-legend kbd {
+    font: inherit;
+    font-size: 10.5px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: #eef2f8;
+    border: 1px solid #e2e8f1;
+    color: var(--ink-soft);
+  }
+  .tut-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+  .tut-legend > div { display: flex; align-items: center; gap: 6px; }
+  .tut-legend .sw-dot { width: 10px; height: 10px; }
+  .tut-legend .sw-line { width: 16px; height: 2.5px; }
+
+  /* ---------------- 关卡选择 ---------------- */
+  .mask .card.level-card {
+    width: 430px;
+    max-width: calc(100vw - 32px);
+    padding: 22px 20px 16px;
+    border-radius: 20px;
+  }
+  .level-card h3 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
+  .level-card .sub {
+    margin: 0 0 14px;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height: 1.5;
+  }
+  .lv-list {
+    display: grid;
+    gap: 8px;
+    max-height: 54vh;
+    overflow-y: auto;
+    margin-bottom: 14px;
+    scrollbar-width: thin;
+  }
+  .lv-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    padding: 12px 14px;
+    border-radius: 13px;
+    border: 1px solid #e3eaf4;
+    background: #fbfcff;
+    cursor: pointer;
+    transition: background 0.14s, border-color 0.14s, transform 0.1s;
+  }
+  .lv-item:hover { background: #f3f7ff; border-color: #c9daf5; }
+  .lv-item:active { transform: scale(0.995); }
+  .lv-item.cur { border-color: #b9d1fb; background: #f1f6ff; }
+  .lv-item .top { display: flex; align-items: center; gap: 8px; }
+  .lv-item .name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .lv-item .badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    color: var(--blue);
+    background: #e3edff;
+    border-radius: 999px;
+    padding: 1px 7px;
+  }
+  .lv-item .desc {
+    margin-top: 4px;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+  .lv-item .meta {
+    margin-top: 6px;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------------- 响应式 ---------------- */
+  @media (max-width: 860px) {
+    .panel {
+      top: auto;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      width: auto;
+      height: 46vh;
+      border-radius: 18px;
+    }
+    .panel-foot { display: none; }
+    .history .empty { padding: 16px 8px; }
+    .topbar { left: 12px; top: 12px; max-width: 62vw; padding: 10px 14px; }
+    .topbar h1 { font-size: 15px; }
+    .topbar p, .topbar .kicker { display: none; }
+    .minilegend { display: none; }
+    .zoombar { bottom: calc(46vh + 20px); }
+    .toast { bottom: calc(46vh + 78px); }
+    .win { gap: 10px; padding: 11px 12px; }
+    .win h2 { font-size: 14px; }
+    .win p { font-size: 11.5px; }
+    .win .row .btn { padding: 0 10px; font-size: 12px; }
+    .win .mark { width: 32px; height: 32px; }
+    .stats { padding: 10px 14px 8px; gap: 6px; }
+    .stat { padding: 8px 10px; }
+    .stat .v { font-size: 18px; }
+    .actions { padding: 0 14px 10px; }
+    .hist-head { padding: 9px 14px 6px; }
+    .redo-hint { margin: 0 14px 6px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="board"></canvas>
+
+<div class="topbar" id="topbar">
+  <div class="tb-head">
+    <div class="kicker">Reverse Graph</div>
+    <button class="help-btn" id="btnHelp" type="button" title="再看一遍玩法说明">玩法</button>
+  </div>
+  <h1 id="lvName">反转图</h1>
+  <p id="lvDesc"></p>
+</div>
+
+<div class="zoombar">
+  <button id="zoomOut" title="缩小">−</button>
+  <div class="zoom-val" id="zoomVal">100%</div>
+  <button id="zoomIn" title="放大">+</button>
+  <div class="sep"></div>
+  <button class="fit" id="zoomFit" title="适配视图">适配</button>
+</div>
+
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <div class="t">局面状态</div>
+    <div class="s" id="headNote">进行中</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <span class="k">操作步数</span>
+      <span class="v" id="statSteps">0</span>
+    </div>
+    <div class="stat accent" id="statWrongBox">
+      <span class="k">待翻转边数</span>
+      <span class="v" id="statWrong">0</span>
+    </div>
+    <div class="stat">
+      <span class="k">总边数</span>
+      <span class="v" id="statEdges">0</span>
+    </div>
+    <div class="stat">
+      <span class="k">总点数</span>
+      <span class="v" id="statVerts">0</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="btnUndo">回退一步 <kbd>U</kbd></button>
+    <button class="btn" id="btnRedo">重做 <kbd>Y</kbd></button>
+  </div>
+
+  <div class="minilegend">
+    <div><i class="sw-dot green"></i>入度 0 · 可点</div>
+    <div><i class="sw-dot blue"></i>入度 &gt; 0</div>
+    <div><i class="sw-line gray"></i>方向正确</div>
+    <div><i class="sw-line orange"></i>方向错误</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="hist-head">
+    <div class="t">历史记录</div>
+    <div class="c" id="histCount">0 步</div>
+  </div>
+
+  <div class="redo-hint" id="redoHint" hidden></div>
+
+  <div class="warn" id="deadWarn" hidden></div>
+
+  <ul class="history" id="history"></ul>
+
+  <div class="panel-foot">
+    <span>拖动平移 · 滚轮缩放</span>
+    <span><kbd>R</kbd> 重新开始</span>
+  </div>
+
+  <div class="actions">
+    <button class="btn ghost" id="btnRestart">重新开始</button>
+    <button class="btn ghost" id="btnLevels">关卡选择</button>
+  </div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<div class="win" id="winCard">
+  <div class="mark"></div>
+  <div class="txt">
+    <h2>全部边方向正确</h2>
+    <p id="winSub">用了 0 步完成本关</p>
+  </div>
+  <div class="row">
+    <button class="btn ghost" id="winClose">看看棋盘</button>
+    <button class="btn" id="winAgain">再来一次</button>
+  </div>
+</div>
+
+<div class="mask" id="modalMask">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 id="modalTitle">重新开始？</h3>
+    <p id="modalText">将回到本关初始局面，并清除全部 <b>操作历史</b>，此操作不可恢复。</p>
+    <div class="row">
+      <button class="btn ghost" id="modalCancel">取消</button>
+      <button class="btn danger" id="modalOk">确认重新开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- 玩法说明（初次进入自动弹出） ---------------- -->
+<div class="mask" id="tutMask">
+  <div class="card tut-card" role="dialog" aria-modal="true" aria-labelledby="tutTitle">
+    <div class="tut-kicker">HOW TO PLAY</div>
+    <h2 id="tutTitle">玩法说明</h2>
+    <p class="tut-lead">目标：让每条边的方向都变成它的「预期方向」。所有边都对，就通关。</p>
+
+    <svg class="tut-svg" viewBox="0 0 440 186" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <marker id="mkOrange" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="4.6" markerHeight="4.6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#f0801f"/>
+        </marker>
+        <marker id="mkGray" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="4.6" markerHeight="4.6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#aab6c6"/>
+        </marker>
+        <marker id="mkSlate" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="4" markerHeight="4" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#c3cedd"/>
+        </marker>
+      </defs>
+
+      <!-- 点击前：中间绿点可点，三条边全部指向外侧（橙色＝方向错误） -->
+      <g stroke="#f0801f" stroke-width="2.6" stroke-linecap="round">
+        <line x1="84.5" y1="77.3" x2="47.1" y2="39.3" marker-end="url(#mkOrange)"/>
+        <line x1="105.5" y1="77.3" x2="142.9" y2="39.3" marker-end="url(#mkOrange)"/>
+        <line x1="95" y1="103" x2="95" y2="137" marker-end="url(#mkOrange)"/>
+      </g>
+      <circle cx="95" cy="88" r="20" fill="#16a86b" fill-opacity="0.12"/>
+      <circle cx="95" cy="88" r="13" fill="#16a86b"/>
+      <circle cx="38" cy="30" r="11" fill="#2f6fed"/>
+      <circle cx="152" cy="30" r="11" fill="#2f6fed"/>
+      <circle cx="95" cy="150" r="11" fill="#2f6fed"/>
+      <text x="95" y="180" text-anchor="middle" font-size="10.5" fill="#8b97a9">点击前</text>
+
+      <!-- 中间箭头 -->
+      <line x1="196" y1="94" x2="236" y2="94" stroke="#b6c4d6" stroke-width="2.2"
+            stroke-linecap="round" marker-end="url(#mkSlate)"/>
+      <text x="216" y="78" text-anchor="middle" font-size="10.5" fill="#8b97a9">点击绿点</text>
+
+      <!-- 点击后：连边全部掉头，全部变灰（方向正确），中心点入度变大变蓝 -->
+      <g stroke="#aab6c6" stroke-width="2.6" stroke-linecap="round">
+        <line x1="292.1" y1="39.3" x2="329.5" y2="77.3" marker-end="url(#mkGray)"/>
+        <line x1="387.9" y1="39.3" x2="350.5" y2="77.3" marker-end="url(#mkGray)"/>
+        <line x1="340" y1="137" x2="340" y2="103" marker-end="url(#mkGray)"/>
+      </g>
+      <circle cx="340" cy="88" r="13" fill="#2f6fed"/>
+      <circle cx="283" cy="30" r="15" fill="#16a86b" fill-opacity="0.12"/>
+      <circle cx="283" cy="30" r="11" fill="#16a86b"/>
+      <circle cx="397" cy="30" r="15" fill="#16a86b" fill-opacity="0.12"/>
+      <circle cx="397" cy="30" r="11" fill="#16a86b"/>
+      <circle cx="340" cy="150" r="15" fill="#16a86b" fill-opacity="0.12"/>
+      <circle cx="340" cy="150" r="11" fill="#16a86b"/>
+      <text x="340" y="180" text-anchor="middle" font-size="10.5" fill="#8b97a9">点击后</text>
+    </svg>
+
+    <ul class="tut-list">
+      <li><span class="num">1</span><span>只有<b>入度为 0</b> 的点能点，它们是<b>绿色</b>的；蓝色点入度不为 0，点了没反应。</span></li>
+      <li><span class="num">2</span><span>点一下绿色点，它的<b>所有连边会立刻掉头</b>（上图就是这个过程）。</span></li>
+      <li><span class="num">3</span><span>方向与预期一致的边是<b>灰色</b>，不一致的是<b>橙色</b>。橙色边数量归零即通关。</span></li>
+      <li><span class="num">4</span><span>点过的点入度会立刻变大，短时间内点不了它——所以<b>点击顺序</b>才是关键。</span></li>
+      <li><span class="num">5</span><span>走错了按 <kbd>U</kbd> 或 <kbd>Backspace</kbd> 回退，<kbd>Y</kbd> 重做，<kbd>R</kbd> 重新开始；滚轮缩放，拖动空白处平移。</span></li>
+    </ul>
+
+    <div class="tut-legend">
+      <div><i class="sw-dot green"></i>入度 0 · 可点</div>
+      <div><i class="sw-dot blue"></i>入度 &gt; 0</div>
+      <div><i class="sw-line gray"></i>方向正确</div>
+      <div><i class="sw-line orange"></i>方向错误</div>
+    </div>
+
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="tutOk">知道了，开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- 关卡选择 ---------------- -->
+<div class="mask" id="levelMask">
+  <div class="card level-card" role="dialog" aria-modal="true" aria-labelledby="lvTitle">
+    <h3 id="lvTitle">关卡选择</h3>
+    <p class="sub">当前为预设关卡，自定义关卡与导入功能稍后开放。</p>
+    <div class="lv-list" id="lvList"></div>
+    <div class="row">
+      <button class="btn ghost" id="levelCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     关卡数据（JSON）
+     vertices: id / label / x / y   —— 画布坐标
+     edges:    a / b / initial / target
+               方向可写 "a->b" / "b->a"，也可简写 0 / 1
+               0 = a->b，1 = b->a（数字或字符串都认，缺省按 0）
+     ============================================================ -->
+<script type="application/json" id="level-data">
+{
+  "version": 1,
+  "levels": [
+    {
+      "id": "demo-01",
+      "name": "示例关卡 · 九点回路",
+      "version": 1,
+      "description": "验证过的可解关卡：最短 5 步，开局有 6 条边方向错误。",
+      "vertices": [
+        { "id": "A", "label": "A", "x": 150, "y": 130 },
+        { "id": "B", "label": "B", "x": 400, "y": 105 },
+        { "id": "C", "label": "C", "x": 700, "y": 150 },
+        { "id": "D", "label": "D", "x": 175, "y": 385 },
+        { "id": "E", "label": "E", "x": 425, "y": 350 },
+        { "id": "F", "label": "F", "x": 715, "y": 405 },
+        { "id": "G", "label": "G", "x": 155, "y": 630 },
+        { "id": "H", "label": "H", "x": 435, "y": 600 },
+        { "id": "I", "label": "I", "x": 735, "y": 650 }
+      ],
+      "edges": [
+        { "a": "A", "b": "B", "initial": "a->b", "target": "a->b" },
+        { "a": "B", "b": "C", "initial": "a->b", "target": "a->b" },
+        { "a": "A", "b": "D", "initial": "a->b", "target": "a->b" },
+        { "a": "B", "b": "E", "initial": "a->b", "target": "a->b" },
+        { "a": "C", "b": "F", "initial": "b->a", "target": "a->b" },
+        { "a": "D", "b": "E", "initial": "a->b", "target": "a->b" },
+        { "a": "E", "b": "F", "initial": "b->a", "target": "a->b" },
+        { "a": "D", "b": "G", "initial": "b->a", "target": "a->b" },
+        { "a": "E", "b": "H", "initial": "b->a", "target": "a->b" },
+        { "a": "F", "b": "I", "initial": "b->a", "target": "a->b" },
+        { "a": "G", "b": "H", "initial": "a->b", "target": "a->b" },
+        { "a": "H", "b": "I", "initial": "b->a", "target": "a->b" }
+      ]
+    },
+    {
+      "id": "demo-02-chain",
+      "name": "示例关卡 · 一条链",
+      "version": 1,
+      "description": "只有一条链，开局有 5 条边方向错误。最短 24 步。",
+      "vertices": [
+        { "id": "A", "label": "A", "x": 150, "y": 130 },
+        { "id": "B", "label": "B", "x": 400, "y": 105 },
+        { "id": "C", "label": "C", "x": 700, "y": 150 },
+        { "id": "F", "label": "F", "x": 175, "y": 385 },
+        { "id": "E", "label": "E", "x": 425, "y": 350 },
+        { "id": "D", "label": "D", "x": 715, "y": 405 },
+        { "id": "G", "label": "G", "x": 155, "y": 630 },
+        { "id": "H", "label": "H", "x": 435, "y": 600 },
+        { "id": "I", "label": "I", "x": 735, "y": 650 }
+      ],
+      "edges": [
+        { "a": "A", "b": "B", "initial": 0, "target": 1 },
+        { "a": "B", "b": "C", "initial": "a->b", "target": "a->b" },
+        { "a": "C", "b": "D", "initial": "a->b", "target": "a->b" },
+        { "a": "D", "b": "E", "initial": "a->b", "target": "b->a" },
+        { "a": "E", "b": "F", "initial": "a->b", "target": 1 },
+        { "a": "F", "b": "G", "initial": "0", "target": "b->a" },
+        { "a": "G", "b": "H", "initial": "a->b", "target": "a->b" },
+        { "a": "H", "b": "I", "initial": "a->b", "target": "b->a" }
+      ]
+    }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =========================================================
+     0. 基础常量与工具
+     ========================================================= */
+  var MIN_SCALE = 0.3;
+  var MAX_SCALE = 2.8;
+  var NODE_R = 20;          // 点的半径（世界坐标）
+  var ARROW = 11;           // 箭头长度（世界坐标）
+
+  var $ = function (id) { return document.getElementById(id); };
+  var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
+  var dist2 = function (ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
+
+  // 边方向解析：支持 "a->b" / "b->a"，也支持简写 0 / 1（0 = a->b，1 = b->a）
+  // 数字、字符串都认；缺省或非法值按 fallback 处理
+  function dirFrom(v, fallback) {
+    if (v === 0 || v === '0' || v === 'a->b') return 1;
+    if (v === 1 || v === '1' || v === 'b->a') return -1;
+    return fallback;
+  }
+
+  /* =========================================================
+     1. 关卡数据装载
+     ========================================================= */
+  var levelBundle = JSON.parse($('level-data').textContent);
+  var LEVELS = (levelBundle.levels || []).slice();
+  var levelIndex = 0;
+  var LEVEL = LEVELS[0] || null;
+
+  // 运行时模型
+  var G = {
+    verts: [],      // { id, label, x, y, inc: [边索引] }
+    edges: [],      // { a, b, init, want, cur, flash }
+    hist: [],       // 走过的点索引（含被回退的隐藏部分）
+    cursor: 0,      // 历史可见长度 = 当前步数
+    solved: false,
+    hover: -1,
+    pulses: []      // { x, y, t0, kind }
+  };
+
+  function buildLevel(lv) {
+    var byId = Object.create(null);
+    G.verts = lv.vertices.map(function (v, i) {
+      byId[v.id] = i;
+      return {
+        id: v.id,
+        label: (v.label === undefined || v.label === null) ? v.id : String(v.label),
+        x: Number(v.x) || 0,
+        y: Number(v.y) || 0,
+        inc: []
+      };
+    });
+
+    G.edges = lv.edges.map(function (e) {
+      var a = byId[e.a], b = byId[e.b];
+      if (a === undefined || b === undefined) {
+        throw new Error('边引用了不存在的点：' + e.a + ' / ' + e.b);
+      }
+      // 方向编码：1 = a→b，-1 = b→a
+      return {
+        a: a,
+        b: b,
+        init: dirFrom(e.initial, 1),
+        want: dirFrom(e.target, 1),
+        cur: 0,
+        animT0: -1e9          // 翻转动画起始时间戳
+      };
+    });
+
+    G.edges.forEach(function (e, i) {
+      G.verts[e.a].inc.push(i);
+      G.verts[e.b].inc.push(i);
+    });
+
+    $('lvName').textContent = lv.name || '反转图';
+    $('lvDesc').textContent = lv.description || '';
+    $('statEdges').textContent = G.edges.length;
+    $('statVerts').textContent = G.verts.length;
+
+    G.hover = -1;
+    buildSolvableSet();   // 必须在 resetBoard -> afterChange 之前完成
+    resetBoard();
+  }
+
+  // 切换到第 i 个关卡
+  function loadLevel(i) {
+    if (i < 0 || i >= LEVELS.length) return;
+    levelIndex = i;
+    LEVEL = LEVELS[i];
+    try {
+      buildLevel(LEVEL);
+    } catch (err) {
+      console.error(err);
+      showToast('关卡数据有误：' + err.message, 6000);
+      return;
+    }
+    hideWinCard();
+    userMoved = false;
+    fitView(false);
+  }
+
+  /* =========================================================
+     1.5 可胜性分析
+     状态编码：bit i = 1 表示边 i 当前方向为 b->a（即 cur === -1）
+     注意：状态图是**有向图**——点过某点后它的入度立刻非零，不能再点，
+     所以必须从目标态做反向 BFS，正向 BFS 得到的是相反的集合。
+     ========================================================= */
+  var SOLVABLE = null;
+
+  function maskOfCurrent() {
+    var m = 0;
+    for (var i = 0; i < G.edges.length; i++) if (G.edges[i].cur === -1) m |= 1 << i;
+    return m;
+  }
+
+  function maskArrowAt(m, ei) {
+    var e = G.edges[ei];
+    return (m >> ei) & 1 ? e.a : e.b;   // bit=1 → b→a，箭头落在 a
+  }
+
+  function maskInDeg(m, vi) {
+    var inc = G.verts[vi].inc, d = 0;
+    for (var k = 0; k < inc.length; k++) if (maskArrowAt(m, inc[k]) === vi) d++;
+    return d;
+  }
+
+  function buildSolvableSet() {
+    var ne = G.edges.length;
+    if (ne > 16) { SOLVABLE = null; return; }   // 状态空间太大就不分析
+    var target = 0;
+    for (var i = 0; i < ne; i++) if (G.edges[i].want === -1) target |= 1 << i;
+
+    var set = new Set();
+    var queue = [target];
+    set.add(target);
+    for (var head = 0; head < queue.length; head++) {
+      var x = queue[head];
+      for (var v = 0; v < G.verts.length; v++) {
+        var inc = G.verts[v].inc;
+        if (!inc.length) continue;
+        var y = x;
+        for (var k = 0; k < inc.length; k++) y ^= 1 << inc[k];
+        if (set.has(y)) continue;
+        if (maskInDeg(y, v) !== 0) continue;   // 在 y 局面点 v 必须合法
+        set.add(y);
+        queue.push(y);
+      }
+    }
+    SOLVABLE = set;
+  }
+
+  // true=还能赢 / false=已无解 / null=没做分析
+  function isWinnable() {
+    return SOLVABLE ? SOLVABLE.has(maskOfCurrent()) : null;
+  }
+
+  /* =========================================================
+     2. 规则逻辑
+     ========================================================= */
+  function inDegree(vi) {
+    var v = G.verts[vi], d = 0;
+    for (var k = 0; k < v.inc.length; k++) {
+      var e = G.edges[v.inc[k]];
+      var to = (e.cur === 1) ? e.b : e.a;   // 箭头所指的点
+      if (to === vi) d++;
+    }
+    return d;
+  }
+
+  // 可点击：有边且入度为 0，且没通关
+  function clickable(vi) {
+    if (G.solved) return false;
+    var v = G.verts[vi];
+    return v.inc.length > 0 && inDegree(vi) === 0;
+  }
+
+  function legalVertices() {
+    var out = [];
+    for (var i = 0; i < G.verts.length; i++) if (clickable(i)) out.push(i);
+    return out;
+  }
+
+  // 翻转一个点的全部连边
+  function flipVertex(vi, now) {
+    var inc = G.verts[vi].inc;
+    for (var k = 0; k < inc.length; k++) {
+      var e = G.edges[inc[k]];
+      e.cur = -e.cur;
+      e.animT0 = now;   // 触发这条边的翻转动画
+    }
+  }
+
+  function wrongCount() {
+    var n = 0;
+    for (var i = 0; i < G.edges.length; i++) if (G.edges[i].cur !== G.edges[i].want) n++;
+    return n;
+  }
+
+  /* =========================================================
+     3. 操作：走一步 / 回退 / 重做 / 重开
+     ========================================================= */
+  function doMove(vi) {
+    var now = performance.now();
+    if (G.solved) { showWinCard(); return; }
+    if (!clickable(vi)) {
+      G.pulses.push({ x: G.verts[vi].x, y: G.verts[vi].y, t0: now, kind: 'bad' });
+      return;
+    }
+    // 走新的一步 → 丢弃"被回退"的重做分支
+    G.hist.length = G.cursor;
+    G.hist.push(vi);
+    G.cursor = G.hist.length;
+    flipVertex(vi, now);
+    G.pulses.push({ x: G.verts[vi].x, y: G.verts[vi].y, t0: now, kind: 'good' });
+    afterChange();
+  }
+
+  function undo() {
+    if (G.cursor <= 0) return;
+    G.cursor--;
+    flipVertex(G.hist[G.cursor], performance.now());
+    afterChange();
+  }
+
+  function redo() {
+    if (G.cursor >= G.hist.length) return;
+    var vi = G.hist[G.cursor];
+    flipVertex(vi, performance.now());
+    G.cursor++;
+    G.pulses.push({ x: G.verts[vi].x, y: G.verts[vi].y, t0: performance.now(), kind: 'good' });
+    afterChange();
+  }
+
+  function resetBoard() {
+    for (var i = 0; i < G.edges.length; i++) {
+      G.edges[i].cur = G.edges[i].init;
+      G.edges[i].animT0 = -1e9;
+    }
+    G.hist = [];
+    G.cursor = 0;
+    G.solved = false;
+    G.pulses.length = 0;
+    hideWinCard();
+    afterChange();
+  }
+
+  function afterChange() {
+    var wasSolved = G.solved;
+    G.solved = G.cursor > 0 && wrongCount() === 0;
+
+    // 面板
+    $('statSteps').textContent = G.cursor;
+    var w = wrongCount();
+    $('statWrong').textContent = w;
+    $('statWrongBox').className = 'stat ' + (w === 0 ? 'done' : 'accent');
+    $('histCount').textContent = G.cursor + ' 步';
+    $('btnUndo').disabled = G.cursor <= 0;
+    $('btnRedo').disabled = G.cursor >= G.hist.length;
+    $('headNote').textContent = G.solved ? '已完成' : '进行中';
+    $('headNote').style.color = '';
+
+    // 这个局面还有没有可能走通
+    var winnable = isWinnable();
+    var warn = $('deadWarn');
+    if (winnable === false && !G.solved) {
+      warn.hidden = false;
+      warn.textContent = '此局面已无法达成目标，按 U 回退或 R 重开';
+      $('headNote').textContent = '已无解';
+      $('headNote').style.color = 'var(--danger)';
+    } else {
+      warn.hidden = true;
+    }
+
+    var pending = G.hist.length - G.cursor;
+    var hint = $('redoHint');
+    if (pending > 0) {
+      hint.hidden = false;
+      hint.textContent = '有 ' + pending + ' 步已回退（暂不显示），按 Y 或点"重做"可恢复';
+    } else {
+      hint.hidden = true;
+    }
+
+    renderHistory();
+
+    if (G.solved && !wasSolved) {
+      $('winSub').textContent = '用了 ' + G.cursor + ' 步完成本关';
+      showWinCard();
+    } else if (!G.solved && wasSolved) {
+      hideWinCard();
+    }
+
+    // 死局提示
+    if (!G.solved && legalVertices().length === 0) {
+      showToast('已无合法点击（所有点入度都大于 0）· 按 U 回退或 R 重开', 3200);
+    }
+  }
+
+  function renderHistory() {
+    var box = $('history');
+    box.innerHTML = '';
+    if (G.cursor === 0) {
+      var d = document.createElement('li');
+      d.className = 'empty';
+      d.textContent = '还没有操作。点击绿色的点开始。';
+      box.appendChild(d);
+      return;
+    }
+    for (var i = 0; i < G.cursor; i++) {
+      var vi = G.hist[i];
+      var li = document.createElement('li');
+      if (i === G.cursor - 1) li.className = 'last';
+      var n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = (i + 1);
+      var pill = document.createElement('span');
+      pill.className = 'pill';
+      var dot = document.createElement('i');
+      dot.className = 'dot';
+      var who = document.createElement('span');
+      who.textContent = G.verts[vi].label;
+      pill.appendChild(dot);
+      pill.appendChild(who);
+      li.appendChild(n);
+      li.appendChild(pill);
+      box.appendChild(li);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* =========================================================
+     4. 相机（缩放 / 平移）
+     ========================================================= */
+  var cam = { s: 1, x: 0, y: 0 };
+  var camAnim = null;
+  var userMoved = false;
+
+  var canvas = $('board');
+  var ctx = canvas.getContext('2d');
+  var dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  var VW = 0, VH = 0;
+
+  function resize() {
+    VW = window.innerWidth;
+    VH = window.innerHeight;
+    canvas.width = Math.round(VW * dpr);
+    canvas.height = Math.round(VH * dpr);
+    canvas.style.width = VW + 'px';
+    canvas.style.height = VH + 'px';
+  }
+
+  // 可用区域中心（缩放按钮/快捷键以它为锚点）
+  function viewCenter() {
+    var pr = $('panel').getBoundingClientRect();
+    var isSheet = pr.width > VW * 0.68;
+    var w = isSheet ? VW : Math.max(240, pr.left - 12);
+    var h = isSheet ? Math.max(220, pr.top - 12) : VH;
+    return { x: w / 2, y: h / 2 };
+  }
+
+  // 候选可用区域：都避开了浮窗和标题卡，取能放得更大的那个
+  function safeRects() {
+    var pr = $('panel').getBoundingClientRect();
+    var tr = $('topbar').getBoundingClientRect();
+    var isSheet = pr.width > VW * 0.68;
+    var rightEdge = isSheet ? VW - 12 : Math.max(240, pr.left - 12);
+    // 底部预留一条空带：缩放条 + 通关提示卡都落在这里，不压住点
+    var bottomEdge = (isSheet ? Math.max(220, pr.top) : VH) - (isSheet ? 84 : 96);
+    var list = [
+      // 1) 标题卡下方
+      { x: 12, y: tr.bottom + 14, w: rightEdge - 12, h: bottomEdge - tr.bottom - 14 },
+      // 2) 标题卡右侧
+      { x: tr.right + 16, y: 12, w: rightEdge - tr.right - 16, h: bottomEdge - 12 }
+    ];
+    var ok = list.filter(function (r) { return r.w > 170 && r.h > 170; });
+    if (!ok.length) ok = [{ x: 8, y: 8, w: Math.max(180, rightEdge - 8), h: Math.max(180, bottomEdge - 8) }];
+    return ok;
+  }
+
+  function fitView(animate) {
+    if (!G.verts.length) return;
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    G.verts.forEach(function (v) {
+      if (v.x < minX) minX = v.x;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+    });
+    var pad = NODE_R + 34;
+    var bw = (maxX - minX) + pad * 2;
+    var bh = (maxY - minY) + pad * 2;
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+    var best = null;
+    safeRects().forEach(function (r) {
+      var s = clamp(Math.min(r.w / bw, r.h / bh), MIN_SCALE, 1.7);
+      if (!best || s > best.s) best = { s: s, r: r };
+    });
+
+    var to = {
+      s: best.s,
+      x: best.r.x + best.r.w / 2 - cx * best.s,
+      y: best.r.y + best.r.h / 2 - cy * best.s
+    };
+    if (animate) {
+      camAnim = { from: { s: cam.s, x: cam.x, y: cam.y }, to: to, t0: performance.now(), dur: 340 };
+    } else {
+      cam.s = to.s; cam.x = to.x; cam.y = to.y;
+      camAnim = null;
+    }
+    userMoved = false;
+    updateZoomLabel();
+  }
+
+  function zoomAt(sx, sy, factor) {
+    var ns = clamp(cam.s * factor, MIN_SCALE, MAX_SCALE);
+    if (ns === cam.s) return;
+    var k = ns / cam.s;
+    cam.x = sx - (sx - cam.x) * k;
+    cam.y = sy - (sy - cam.y) * k;
+    cam.s = ns;
+    camAnim = null;
+    userMoved = true;
+    updateZoomLabel();
+  }
+
+  function updateZoomLabel() {
+    $('zoomVal').textContent = Math.round(cam.s * 100) + '%';
+  }
+
+  function screenOf(v) {
+    return { x: v.x * cam.s + cam.x, y: v.y * cam.s + cam.y };
+  }
+
+  function hitTest(sx, sy) {
+    var tol = Math.max(NODE_R * cam.s + 4, 16);
+    var best = -1, bestD = Infinity;
+    for (var i = 0; i < G.verts.length; i++) {
+      var p = screenOf(G.verts[i]);
+      var d = dist2(p.x, p.y, sx, sy);
+      if (d <= tol * tol && d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  /* =========================================================
+     5. 渲染
+     ========================================================= */
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function stepCamera(now) {
+    if (!camAnim) return;
+    var t = (now - camAnim.t0) / camAnim.dur;
+    if (t >= 1) {
+      cam.s = camAnim.to.s; cam.x = camAnim.to.x; cam.y = camAnim.to.y;
+      camAnim = null;
+      updateZoomLabel();
+      return;
+    }
+    var e = easeOutCubic(t);
+    cam.s = camAnim.from.s + (camAnim.to.s - camAnim.from.s) * e;
+    cam.x = camAnim.from.x + (camAnim.to.x - camAnim.from.x) * e;
+    cam.y = camAnim.from.y + (camAnim.to.y - camAnim.from.y) * e;
+    updateZoomLabel();
+  }
+
+  function draw(now) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, VW, VH);
+
+    // 背景
+    ctx.fillStyle = '#f6f9fd';
+    ctx.fillRect(0, 0, VW, VH);
+
+    drawGrid();
+
+    ctx.setTransform(dpr * cam.s, 0, 0, dpr * cam.s, dpr * cam.x, dpr * cam.y);
+
+    var hoverV = G.hover;
+    var hoverLegal = hoverV >= 0 && clickable(hoverV);
+
+    // 悬停预览：先画一层高亮底
+    if (hoverLegal) {
+      var inc = G.verts[hoverV].inc;
+      ctx.lineCap = 'round';
+      for (var k = 0; k < inc.length; k++) {
+        var g0 = edgeGeom(G.edges[inc[k]]);
+        ctx.beginPath();
+        ctx.moveTo(g0.p0.x, g0.p0.y);
+        ctx.lineTo(g0.p1.x, g0.p1.y);
+        ctx.strokeStyle = 'rgba(47,111,237,0.20)';
+        ctx.lineWidth = 9 / cam.s;
+        ctx.stroke();
+      }
+    }
+
+    // 边
+    for (var i = 0; i < G.edges.length; i++) {
+      drawEdge(G.edges[i], i, now, hoverLegal);
+    }
+
+    // 点
+    for (var j = 0; j < G.verts.length; j++) {
+      drawVertex(j, now);
+    }
+
+    // 点击脉冲
+    for (var p = G.pulses.length - 1; p >= 0; p--) {
+      var pu = G.pulses[p];
+      var age = (now - pu.t0) / 480;
+      if (age >= 1) { G.pulses.splice(p, 1); continue; }
+      var r = NODE_R + 6 + age * 26;
+      ctx.beginPath();
+      ctx.arc(pu.x, pu.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = pu.kind === 'bad'
+        ? 'rgba(240,128,31,' + (0.5 * (1 - age)) + ')'
+        : 'rgba(47,111,237,' + (0.45 * (1 - age)) + ')';
+      ctx.lineWidth = (pu.kind === 'bad' ? 3 : 2.5) / cam.s * (1 - age * 0.4);
+      ctx.stroke();
+    }
+  }
+
+  function drawGrid() {
+    var step = 46 * cam.s;
+    if (step < 15) return;
+    var startX = ((cam.x % step) + step) % step;
+    var startY = ((cam.y % step) + step) % step;
+    ctx.fillStyle = '#d7e0ec';
+    for (var x = startX; x < VW; x += step) {
+      for (var y = startY; y < VH; y += step) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  var EDGE_OK = '#aab6c6';
+  var EDGE_BAD = '#f0801f';
+  var FLIP_MS = 340;              // 单条边翻转动画时长
+
+  function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  // 一条边的无方向几何：p0 靠 a 端、p1 靠 b 端，两端都按节点半径内缩
+  function edgeGeom(e) {
+    var A = G.verts[e.a], B = G.verts[e.b];
+    var dx = B.x - A.x, dy = B.y - A.y;
+    var len = Math.hypot(dx, dy) || 1;
+    var ux = dx / len, uy = dy / len;
+    return {
+      p0: { x: A.x + ux * (NODE_R + 1), y: A.y + uy * (NODE_R + 1) },
+      p1: { x: B.x - ux * (NODE_R + 3), y: B.y - uy * (NODE_R + 3) },
+      ux: ux, uy: uy
+    };
+  }
+
+  // 箭头：尖端落在 (x,y)，朝 (ux,uy) 方向
+  function drawArrow(x, y, ux, uy, scale, color, alpha) {
+    var L = ARROW * scale;
+    var w = L * 0.52;
+    var px = -uy, py = ux;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - ux * L + px * w, y - uy * L + py * w);
+    ctx.lineTo(x - ux * L - px * w, y - uy * L - py * w);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawEdge(e, idx, now, dimOthers) {
+    var g = edgeGeom(e);
+    var correct = e.cur === e.want;
+    var col = correct ? EDGE_OK : EDGE_BAD;
+    var oldCol = correct ? EDGE_BAD : EDGE_OK;    // 翻转前必然是对错的另一种
+    var wid = (correct ? 2.1 : 2.9) / cam.s;
+    var alpha = (correct ? 0.85 : 1) * (dimOthers ? 0.82 : 1);
+
+    // 当前方向：尾 -> 头
+    var tail = (e.cur === 1) ? g.p0 : g.p1;
+    var head = (e.cur === 1) ? g.p1 : g.p0;
+    var hux = (e.cur === 1) ? g.ux : -g.ux;
+    var huy = (e.cur === 1) ? g.uy : -g.uy;
+
+    ctx.lineCap = 'round';
+
+    var p = (now - e.animT0) / FLIP_MS;
+    if (p >= 0 && p < 1) {
+      // ① 旧方向的整条线淡出（不带箭头，避免看起来"两个方向同时存在"）
+      if (p < 0.8) {
+        ctx.globalAlpha = alpha * (1 - p) * 0.85;
+        ctx.strokeStyle = oldCol;
+        ctx.lineWidth = wid;
+        ctx.beginPath();
+        ctx.moveTo(g.p0.x, g.p0.y);
+        ctx.lineTo(g.p1.x, g.p1.y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      // ② 新方向从新的尾部"长"向新的头部，箭头跟着尖端走
+      var u = easeInOutQuad(p);
+      var fx = tail.x + (head.x - tail.x) * u;
+      var fy = tail.y + (head.y - tail.y) * u;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = wid;
+      ctx.beginPath();
+      ctx.moveTo(tail.x, tail.y);
+      ctx.lineTo(fx, fy);
+      ctx.stroke();
+      drawArrow(fx, fy, hux, huy, 0.7 + 0.3 * u, col, alpha);
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    // 常态
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = wid;
+    ctx.beginPath();
+    ctx.moveTo(tail.x, tail.y);
+    ctx.lineTo(head.x, head.y);
+    ctx.stroke();
+    drawArrow(head.x, head.y, hux, huy, 1, col, alpha);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawVertex(vi, now) {
+    var v = G.verts[vi];
+    var legal = clickable(vi);
+    var hovered = G.hover === vi;
+    var r = NODE_R * (hovered && legal ? 1.08 : 1);
+
+    // 光晕
+    if (legal) {
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, r + 7, 0, Math.PI * 2);
+      ctx.fillStyle = hovered ? 'rgba(22,168,107,0.20)' : 'rgba(22,168,107,0.11)';
+      ctx.fill();
+    }
+
+    // 阴影 + 本体
+    ctx.save();
+    ctx.shadowColor = legal ? 'rgba(16,120,80,0.30)' : 'rgba(28,52,100,0.24)';
+    ctx.shadowBlur = hovered ? 22 : 14;
+    ctx.shadowOffsetY = 3;
+
+    var g = ctx.createLinearGradient(v.x - r, v.y - r, v.x + r, v.y + r);
+    if (legal) {
+      g.addColorStop(0, '#25c07d');
+      g.addColorStop(1, '#0f9359');
+    } else {
+      g.addColorStop(0, '#4a86f5');
+      g.addColorStop(1, '#2358cc');
+    }
+    ctx.beginPath();
+    ctx.arc(v.x, v.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+
+    // 描边
+    ctx.beginPath();
+    ctx.arc(v.x, v.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = legal ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 2 / cam.s;
+    ctx.stroke();
+
+    // 标签
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 ' + (13.5) + 'px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(v.label, v.x, v.y + 0.5);
+  }
+
+  function frame(now) {
+    stepCamera(now);
+    draw(now);
+    requestAnimationFrame(frame);
+  }
+
+  /* =========================================================
+     6. 交互：指针 / 滚轮 / 键盘
+     ========================================================= */
+  var pointers = new Map();
+  var drag = null;         // { vi, lx, ly, sx, sy, moved, mode }
+  var pinch = null;        // { d, cx, cy }
+
+  function setHover(vi) {
+    if (G.hover === vi) return;
+    G.hover = vi;
+    canvas.classList.toggle('on-node', vi >= 0 && clickable(vi));
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 2) {
+      drag = null;
+      startPinch();
+      return;
+    }
+
+    var vi = hitTest(e.clientX, e.clientY);
+    drag = { vi: vi, lx: e.clientX, ly: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, mode: 'pending' };
+    if (vi < 0) {
+      drag.mode = 'pan';
+      canvas.classList.add('panning');
+    }
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (!pointers.has(e.pointerId)) {
+      setHover(hitTest(e.clientX, e.clientY));
+      return;
+    }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pinch && pointers.size >= 2) {
+      updatePinch();
+      return;
+    }
+    if (!drag) return;
+
+    var dx = e.clientX - drag.lx;
+    var dy = e.clientY - drag.ly;
+    drag.lx = e.clientX;
+    drag.ly = e.clientY;
+
+    if (!drag.moved) {
+      if (dist2(e.clientX, e.clientY, drag.sx, drag.sy) > 36) {
+        drag.moved = true;
+        drag.mode = 'pan';
+        canvas.classList.add('panning');
+      }
+    }
+    if (drag.mode === 'pan') {
+      cam.x += dx;
+      cam.y += dy;
+      camAnim = null;
+      userMoved = true;
+      setHover(-1);
+    }
+  });
+
+  function endPointer(e) {
+    if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
+
+    if (pinch && pointers.size < 2) { pinch = null; drag = null; return; }
+
+    if (drag) {
+      var wasClick = !drag.moved && drag.mode === 'pending' && drag.vi >= 0;
+      canvas.classList.remove('panning');
+      if (wasClick) {
+        var vi = hitTest(e.clientX, e.clientY);
+        if (vi === drag.vi) doMove(vi);
+      }
+      drag = null;
+    }
+    if (pointers.size === 0) setHover(hitTest(e.clientX, e.clientY));
+  }
+
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('pointerleave', function () { setHover(-1); });
+
+  function startPinch() {
+    var pts = Array.from(pointers.values());
+    var d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    pinch = { d: d, cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2 };
+    canvas.classList.remove('panning');
+    setHover(-1);
+  }
+
+  function updatePinch() {
+    var pts = Array.from(pointers.values());
+    if (pts.length < 2 || !pinch) return;
+    var d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    var cx = (pts[0].x + pts[1].x) / 2;
+    var cy = (pts[0].y + pts[1].y) / 2;
+    if (pinch.d > 8) zoomAt(cx, cy, d / pinch.d);
+    cam.x += cx - pinch.cx;
+    cam.y += cy - pinch.cy;
+    pinch.d = d; pinch.cx = cx; pinch.cy = cy;
+  }
+
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.012 : 0.0016));
+    factor = clamp(factor, 0.7, 1.42);
+    zoomAt(e.clientX, e.clientY, factor);
+    setHover(hitTest(e.clientX, e.clientY));
+  }, { passive: false });
+
+  window.addEventListener('keydown', function (e) {
+    // 弹窗打开时只处理 Esc / Enter
+    if (activeMask) {
+      if (e.key === 'Escape') {
+        dismissMask();
+        e.preventDefault();
+      } else if (e.key === 'Enter' && activeMask === $('modalMask')) {
+        runConfirm();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    var k = e.key;
+    if (k === 'Backspace' || k === 'u' || k === 'U') {
+      e.preventDefault();
+      undo();
+    } else if (k === 'y' || k === 'Y') {
+      e.preventDefault();
+      redo();
+    } else if (k === 'r' || k === 'R') {
+      e.preventDefault();
+      askRestart();
+    } else if (k === '+' || k === '=') {
+      e.preventDefault();
+      var c = viewCenter();
+      zoomAt(c.x, c.y, 1.18);
+    } else if (k === '-' || k === '_') {
+      e.preventDefault();
+      var c2 = viewCenter();
+      zoomAt(c2.x, c2.y, 1 / 1.18);
+    } else if (k === '0') {
+      e.preventDefault();
+      fitView(true);
+    } else if (k === 'Escape') {
+      hideWinCard();
+    }
+  });
+
+  /* =========================================================
+     7. 面板按钮 / 弹窗 / 提示
+     ========================================================= */
+  var activeMask = null;          // 当前打开的浮层（Esc 只关最上面那层）
+
+  function showMask(el) { el.classList.add('show'); activeMask = el; }
+  function hideMask(el) {
+    el.classList.remove('show');
+    if (activeMask === el) activeMask = null;
+  }
+  function dismissMask() {
+    if (!activeMask) return;
+    if (activeMask === $('tutMask')) markTutorialSeen();
+    if (activeMask === $('modalMask')) confirmAction = null;
+    hideMask(activeMask);
+  }
+
+  /* ---------- 通用确认框 ---------- */
+  var confirmAction = null;
+  function openConfirm(opt) {
+    $('modalTitle').textContent = opt.title || '确认';
+    $('modalText').innerHTML = opt.html || '';
+    $('modalOk').textContent = opt.okText || '确认';
+    confirmAction = opt.onOk || null;
+    showMask($('modalMask'));
+    setTimeout(function () { $('modalOk').focus(); }, 30);
+  }
+  function closeConfirm() {
+    hideMask($('modalMask'));
+    confirmAction = null;
+  }
+  function runConfirm() {
+    var fn = confirmAction;
+    closeConfirm();
+    if (fn) fn();
+  }
+
+  function askRestart() {
+    openConfirm({
+      title: '重新开始？',
+      html: '将回到本关初始局面，并清除全部 <b>操作历史</b>，此操作不可恢复。',
+      okText: '确认重新开始',
+      onOk: function () {
+        resetBoard();
+        showToast('已重新开始，历史记录已清空', 1800);
+      }
+    });
+  }
+
+  /* ---------- 玩法说明 ---------- */
+  var TUT_KEY = 'reverseGraph.tutorial.v1';
+  var store = {
+    get: function (k) {
+      try { return window.localStorage.getItem(k); } catch (e) { return null; }
+    },
+    set: function (k, v) {
+      try { window.localStorage.setItem(k, v); } catch (e) { /* file:// 下可能不可用 */ }
+    }
+  };
+  function markTutorialSeen() { store.set(TUT_KEY, '1'); }
+  function openTutorial() { showMask($('tutMask')); }
+
+  /* ---------- 关卡选择 ---------- */
+  function openLevelList() {
+    var box = $('lvList');
+    box.innerHTML = '';
+    if (!LEVELS.length) {
+      var empty = document.createElement('div');
+      empty.className = 'lv-item';
+      empty.style.cursor = 'default';
+      empty.textContent = '没有可用关卡';
+      box.appendChild(empty);
+    }
+    LEVELS.forEach(function (lv, i) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lv-item' + (i === levelIndex ? ' cur' : '');
+
+      var top = document.createElement('div');
+      top.className = 'top';
+      var nm = document.createElement('span');
+      nm.className = 'name';
+      nm.textContent = lv.name || ('关卡 ' + (i + 1));
+      top.appendChild(nm);
+      if (i === levelIndex) {
+        var bd = document.createElement('span');
+        bd.className = 'badge';
+        bd.textContent = '当前';
+        top.appendChild(bd);
+      }
+
+      var ds = document.createElement('div');
+      ds.className = 'desc';
+      ds.textContent = lv.description || '（暂无简介）';
+
+      var mt = document.createElement('div');
+      mt.className = 'meta';
+      mt.textContent = (lv.vertices || []).length + ' 个点 · '
+        + (lv.edges || []).length + ' 条边';
+
+      item.appendChild(top);
+      item.appendChild(ds);
+      item.appendChild(mt);
+      item.addEventListener('click', function () { chooseLevel(i); });
+      box.appendChild(item);
+    });
+    showMask($('levelMask'));
+  }
+
+  function chooseLevel(i) {
+    hideMask($('levelMask'));
+    var name = (LEVELS[i] && LEVELS[i].name) || '';
+    if (i === levelIndex) {
+      resetBoard();                       // 选的就是当前关：等同重开
+      showToast('已重置「' + name + '」', 1800);
+      return;
+    }
+    loadLevel(i);
+    showToast('已切换到「' + name + '」', 2000);
+  }
+
+  function askLevelList() {
+    if (G.hist.length > 0) {
+      openConfirm({
+        title: '切换关卡？',
+        html: '本关已有 <b>' + G.hist.length + ' 步</b>操作记录，切换关卡后这些历史会丢失，且不可恢复。',
+        okText: '确认切换',
+        onOk: openLevelList
+      });
+    } else {
+      openLevelList();
+    }
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  $('btnUndo').addEventListener('click', undo);
+  $('btnRedo').addEventListener('click', redo);
+  $('btnRestart').addEventListener('click', askRestart);
+  $('btnLevels').addEventListener('click', askLevelList);
+  $('btnHelp').addEventListener('click', openTutorial);
+  $('tutOk').addEventListener('click', function () {
+    markTutorialSeen();
+    hideMask($('tutMask'));
+  });
+  $('levelCancel').addEventListener('click', function () { hideMask($('levelMask')); });
+  $('winAgain').addEventListener('click', function () { hideWinCard(); resetBoard(); });
+  $('winClose').addEventListener('click', hideWinCard);
+  $('modalCancel').addEventListener('click', closeConfirm);
+  $('modalOk').addEventListener('click', runConfirm);
+  $('modalMask').addEventListener('click', function (e) {
+    if (e.target === $('modalMask')) closeConfirm();
+  });
+  $('levelMask').addEventListener('click', function (e) {
+    if (e.target === $('levelMask')) hideMask($('levelMask'));
+  });
+  $('tutMask').addEventListener('click', function (e) {
+    if (e.target === $('tutMask')) {
+      markTutorialSeen();
+      hideMask($('tutMask'));
+    }
+  });
+  $('zoomIn').addEventListener('click', function () {
+    var c = viewCenter(); zoomAt(c.x, c.y, 1.2);
+  });
+  $('zoomOut').addEventListener('click', function () {
+    var c = viewCenter(); zoomAt(c.x, c.y, 1 / 1.2);
+  });
+  $('zoomFit').addEventListener('click', function () { fitView(true); });
+
+  function showWinCard() {
+    var el = $('winCard');
+    var zb = document.querySelector('.zoombar').getBoundingClientRect();
+    el.style.left = viewCenter().x + 'px';
+    el.style.bottom = (VH - zb.top + 12) + 'px';
+    el.classList.add('show');
+  }
+  function hideWinCard() { $('winCard').classList.remove('show'); }
+
+  var toastTimer = null;
+  function showToast(msg, ms) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 2200);
+  }
+
+  /* =========================================================
+     8. 启动
+     ========================================================= */
+  window.addEventListener('resize', function () {
+    resize();
+    if (!userMoved) fitView(false);
+    if ($('winCard').classList.contains('show')) showWinCard();   // 跟随缩放条重新定位
+  });
+
+  resize();
+  loadLevel(0);
+  requestAnimationFrame(frame);
+
+  // 初次进入：弹玩法说明（看过一次就不再自动弹，可用标题卡上的「玩法」重新打开）
+  if (store.get(TUT_KEY) !== '1') {
+    setTimeout(openTutorial, 150);
+  }
+
+  // 调试钩子：便于自动化测试 / 将来的关卡编辑器直接读写运行时状态
+  window.RG = {
+    G: G, cam: cam,
+    levels: LEVELS,
+    levelIndex: function () { return levelIndex; },
+    currentLevel: function () { return LEVEL; },
+    loadLevel: loadLevel,
+    loadLevelObject: buildLevel,
+    dirFrom: dirFrom,
+    doMove: doMove, undo: undo, redo: redo, reset: resetBoard,
+    fitView: fitView, legal: legalVertices, wrong: wrongCount,
+    refresh: afterChange, winnable: isWinnable,
+    isMaskOpen: function () { return !!activeMask; },
+    solvableMasks: function () { return SOLVABLE ? Array.from(SOLVABLE).sort(function (a, b) { return a - b; }) : null; },
+    // 把世界坐标换算成屏幕坐标（自动化测试点击用）
+    screenOf: function (vi) { return screenOf(G.verts[vi]); }
+  };
+})();
+</script>
+</body>
+</html>

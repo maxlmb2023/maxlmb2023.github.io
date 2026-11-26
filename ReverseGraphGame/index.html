@@ -407,7 +407,9 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.22s, transform 0.22s;
-    z-index: 30;
+    z-index: 50;              /* 高于遮罩（40），弹窗打开时的提示也看得见 */
+    max-width: min(560px, calc(100vw - 40px));
+    text-align: center;
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
@@ -615,13 +617,47 @@
     padding: 22px 20px 16px;
     border-radius: 20px;
   }
-  .level-card h3 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
+  .level-card .lv-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 4px;
+  }
+  .level-card h3 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+  .btn.lv-import {
+    flex: none;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--blue);
+    border-color: #cfe0fb;
+    background: #f4f8ff;
+  }
+  .btn.lv-import:hover:not(:disabled) { background: #e9f1ff; border-color: #b9d1fb; }
+  .lv-item .badge.user { color: #8a5a00; background: #fff2d8; }
   .level-card .sub {
     margin: 0 0 14px;
     font-size: 11.5px;
     color: var(--ink-faint);
     line-height: 1.5;
   }
+  .level-card .lv-msg {
+    margin: -8px 0 12px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #0e7a4d;
+    background: #ecfaf3;
+    border: 1px solid #cdeedd;
+    word-break: break-word;
+  }
+  .level-card .lv-msg.err { color: #b4342b; background: #fdeeec; border-color: #f7d3ce; }
+  .level-card .lv-msg[hidden] { display: none; }
+
   .lv-list {
     display: grid;
     gap: 8px;
@@ -894,9 +930,14 @@
 <!-- ---------------- 关卡选择 ---------------- -->
 <div class="mask" id="levelMask">
   <div class="card level-card" role="dialog" aria-modal="true" aria-labelledby="lvTitle">
-    <h3 id="lvTitle">关卡选择</h3>
-    <p class="sub">当前为预设关卡，自定义关卡与导入功能稍后开放。</p>
+    <div class="lv-head">
+      <h3 id="lvTitle">关卡选择</h3>
+      <button class="btn ghost lv-import" id="btnImport" type="button">导入自定义关卡</button>
+    </div>
+    <p class="sub" id="lvSub">暂未导入自定义关卡</p>
+    <p class="lv-msg" id="lvMsg" hidden></p>
     <div class="lv-list" id="lvList"></div>
+    <input type="file" id="levelFile" accept=".json,application/json" hidden>
     <div class="row">
       <button class="btn ghost" id="levelCancel">取消</button>
     </div>
@@ -909,6 +950,16 @@
      edges:    a / b / initial / target
                方向可写 "a->b" / "b->a"，也可简写 0 / 1
                0 = a->b，1 = b->a（数字或字符串都认，缺省按 0）
+
+     同目录下的 levels.json 会被自动读取，格式与本段完全一致
+     （{ "version":1, "levels":[ ... ] } 或直接是一个关卡数组），
+     其关卡**追加在内置关卡之后**。注意：file:// 直接打开时浏览器
+     禁止读取本地 JSON，需用 http 打开（例如 python -m http.server）。
+
+     玩家还能在关卡列表里「导入自定义关卡」：选一个同格式的 JSON
+     （单个关卡 / 关卡数组 / { "version":1,"levels":[...] } 都行），
+     校验通过后存进 localStorage（reverseGraph.customLevels.v1），
+     同样追加在列表最后，并且与内置关卡一样可玩、可记忆进度。
      ============================================================ -->
 <script type="application/json" id="level-data">
 {
@@ -992,6 +1043,17 @@
   var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
   var dist2 = function (ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
 
+  // localStorage 安全包装：file:// 或隐私模式下可能抛异常，一律降级为"读不到"
+  var store = {
+    get: function (k) {
+      try { return window.localStorage.getItem(k); } catch (e) { return null; }
+    },
+    // 返回是否写入成功：导入关卡时若落盘失败必须告诉用户，不能假装成功
+    set: function (k, v) {
+      try { window.localStorage.setItem(k, v); return true; } catch (e) { return false; }
+    }
+  };
+
   // 边方向解析：支持 "a->b" / "b->a"，也支持简写 0 / 1（0 = a->b，1 = b->a）
   // 数字、字符串都认；缺省或非法值按 fallback 处理
   function dirFrom(v, fallback) {
@@ -1004,9 +1066,21 @@
      1. 关卡数据装载
      ========================================================= */
   var levelBundle = JSON.parse($('level-data').textContent);
-  var LEVELS = (levelBundle.levels || []).slice();
+  var BUILTIN = (levelBundle.levels || []).slice();   // 页面内嵌
+  var externalLevels = [];                            // 同目录 levels.json（服务端配置）
+  var userLevels = [];                                // 用户导入，存在 localStorage
+  var LEVELS = BUILTIN.slice();                       // 三者合并后的实际列表（原地更新，别换引用）
   var levelIndex = 0;
   var LEVEL = LEVELS[0] || null;
+
+  // 重建合并列表：内置 -> levels.json -> 用户导入。
+  // 用原地修改（length=0 + push）保持 LEVELS 的引用不变，调试钩子与外部持有者不会失效。
+  function rebuildLevels() {
+    LEVELS.length = 0;
+    Array.prototype.push.apply(LEVELS, BUILTIN);
+    Array.prototype.push.apply(LEVELS, externalLevels);
+    Array.prototype.push.apply(LEVELS, userLevels);
+  }
 
   // 运行时模型
   var G = {
@@ -1078,6 +1152,330 @@
     hideWinCard();
     userMoved = false;
     fitView(false);
+  }
+
+  /* =========================================================
+     1.2 进度存储：记住上次玩的关卡与步骤，下次自动恢复
+     只存"点了哪些点"（用点的 id，不用下标，避免关卡改序后错位），
+     恢复时逐步重放，每一步都要重新通过合法性检查。
+     ========================================================= */
+  var SESSION_KEY = 'reverseGraph.session.v1';
+  var restoring = false;    // 恢复期间不落盘、不弹通关卡
+  var quietWin = false;
+
+  function saveSession() {
+    if (restoring || !LEVEL) return;
+    var hist = [];
+    for (var i = 0; i < G.hist.length; i++) hist.push(G.verts[G.hist[i]].id);
+    store.set(SESSION_KEY, JSON.stringify({
+      v: 1,
+      levelId: LEVEL.id,
+      hist: hist,
+      cursor: G.cursor,
+      at: Date.now()
+    }));
+  }
+
+  function readSession() {
+    var raw = store.get(SESSION_KEY);
+    if (!raw) return null;
+    try {
+      var o = JSON.parse(raw);
+      if (!o || typeof o.levelId !== 'string' || !Array.isArray(o.hist)) return null;
+      return o;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 返回 null 表示没有可恢复的进度（关卡已不存在等）
+  function restoreSession(saved) {
+    var idx = -1;
+    for (var i = 0; i < LEVELS.length; i++) {
+      if (LEVELS[i].id === saved.levelId) { idx = i; break; }
+    }
+    if (idx < 0) return null;
+
+    restoring = true;
+    loadLevel(idx);                      // 会重置棋盘、清空历史
+
+    var byId = Object.create(null);
+    G.verts.forEach(function (v, i) { byId[v.id] = i; });
+
+    var played = 0, dropped = 0;
+    for (var k = 0; k < saved.hist.length; k++) {
+      var vi = byId[saved.hist[k]];
+      // 合法性检查：点存在 / 有连边 / 当前入度为 0
+      if (vi === undefined || !G.verts[vi].inc.length || inDegree(vi) !== 0) {
+        dropped = saved.hist.length - k;
+        break;
+      }
+      flipVertex(vi, -1e9);              // -1e9：不播翻转动画
+      G.hist.push(vi);
+      played++;
+    }
+
+    var want = (typeof saved.cursor === 'number') ? saved.cursor : played;
+    G.cursor = clamp(Math.round(want), 0, played);
+
+    restoring = false;
+    quietWin = true;                     // 恢复出来的通关局面不再弹一次卡
+    afterChange();
+    quietWin = false;
+
+    return {
+      name: LEVELS[idx].name || ('关卡 ' + (idx + 1)),
+      steps: G.cursor,
+      played: played,
+      dropped: dropped
+    };
+  }
+
+  /* =========================================================
+     1.4 外部关卡：同目录 levels.json
+     格式与内置 level-data 完全一致，关卡追加在内置关卡之后。
+     注意 file:// 下浏览器禁止 fetch 本地文件，此时静默降级。
+     ========================================================= */
+  var externalInfo = null;   // { ok, added, skipped, broken, reason }
+
+  function loadExternalLevels() {
+    if (typeof fetch !== 'function') return Promise.resolve();
+
+    return fetch('levels.json', { cache: 'no-store' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var list = Array.isArray(data) ? data
+          : (data && Array.isArray(data.levels) ? data.levels : null);
+        if (!list) throw new Error('格式应为 { "version":1, "levels":[ ... ] } 或关卡数组');
+
+        var seen = Object.create(null);
+        LEVELS.forEach(function (lv) { seen[lv.id] = 1; });
+
+        var added = 0, skipped = [], broken = 0;
+        list.forEach(function (lv, i) {
+          if (!lv || typeof lv !== 'object'
+            || !Array.isArray(lv.vertices) || !Array.isArray(lv.edges)) {
+            broken++;
+            return;
+          }
+          if (!lv.id) lv.id = 'custom-' + (i + 1);
+          if (seen[lv.id]) { skipped.push(lv.id); return; }   // id 重复会破坏进度记忆
+          seen[lv.id] = 1;
+          externalLevels.push(lv);
+          added++;
+        });
+        rebuildLevels();
+
+        externalInfo = { ok: true, added: added, skipped: skipped, broken: broken };
+        if (skipped.length) console.warn('[levels.json] 跳过重复 id：' + skipped.join(', '));
+        if (broken) console.warn('[levels.json] 跳过 ' + broken + ' 个结构不完整的关卡');
+      })
+      .catch(function (err) {
+        externalInfo = { ok: false, reason: err.message };
+        console.info('[levels.json] 未载入（' + err.message + '）'
+          + (location.protocol === 'file:' ? '：本地文件模式下浏览器禁止读取 JSON，请用 http 打开' : ''));
+      });
+  }
+
+  // 关卡列表里的一句话状态：只统计用户自己导入的关卡
+  // （levels.json 是服务端配置，不需要在这里提示）
+  function levelSubNote() {
+    if (!userLevels.length) return '暂未导入自定义关卡，可点右上角导入 JSON 文件';
+    return '已加载 ' + userLevels.length + ' 个自定义关卡';
+  }
+
+
+  /* =========================================================
+     1.45 用户导入的关卡（存 localStorage，与内置 / levels.json 等价）
+     导入的是关卡对象、关卡数组，或 { "levels": [...] }（与 levels 目录下的文件同格式）。
+     导入前做完整校验：结构、点 id、坐标、边端点、方向取值，坏数据一律拒收，
+     免得一个错文件把整个列表或存档搞坏。
+     ========================================================= */
+  var USER_KEY = 'reverseGraph.customLevels.v1';
+  var MAX_VERTS = 200, MAX_EDGES = 64;
+
+  // 导入时的方向取值校验：比运行时更严格，拼错要能看见
+  function dirStrict(v, what) {
+    if (v === undefined || v === null || v === '') return 0;   // 缺省按 a->b
+    if (v === 0 || v === '0' || v === 'a->b') return 0;
+    if (v === 1 || v === '1' || v === 'b->a') return 1;
+    throw new Error(what + ' 只能是 0 / 1 / "a->b" / "b->a"，收到 ' + JSON.stringify(v));
+  }
+
+  function cut(v, n) {
+    var t = (v === undefined || v === null) ? '' : String(v).trim();
+    return t.length > n ? t.slice(0, n) + '…' : t;
+  }
+
+  // 把任意输入整理成干净关卡；有问题就抛错（错误信息带具体位置）
+  function normalizeImportedLevel(raw, fallbackName) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('不是一个关卡对象');
+    if (!Array.isArray(raw.vertices) || !raw.vertices.length) throw new Error('缺少 vertices（点）数组');
+    if (!Array.isArray(raw.edges) || !raw.edges.length) throw new Error('缺少 edges（边）数组');
+    if (raw.vertices.length > MAX_VERTS) throw new Error('点数 ' + raw.vertices.length + ' 超过上限 ' + MAX_VERTS);
+    if (raw.edges.length > MAX_EDGES) throw new Error('边数 ' + raw.edges.length + ' 超过上限 ' + MAX_EDGES);
+
+    var seen = Object.create(null);
+    var vertices = raw.vertices.map(function (v, i) {
+      if (!v || typeof v !== 'object') throw new Error('第 ' + (i + 1) + ' 个点不是对象');
+      if (v.id === undefined || v.id === null || v.id === '') throw new Error('第 ' + (i + 1) + ' 个点缺少 id');
+      var id = String(v.id);
+      if (seen[id]) throw new Error('点 id 重复：' + id);
+      seen[id] = 1;
+      var x = Number(v.x), y = Number(v.y);
+      if (!isFinite(x) || !isFinite(y)) throw new Error('点 ' + id + ' 的 x / y 不是数字');
+      return { id: id, label: cut(v.label === undefined || v.label === null ? id : v.label, 6), x: x, y: y };
+    });
+
+    var edges = raw.edges.map(function (e, i) {
+      if (!e || typeof e !== 'object') throw new Error('第 ' + (i + 1) + ' 条边不是对象');
+      var a = String(e.a), b = String(e.b);
+      if (!seen[a] || !seen[b]) throw new Error('第 ' + (i + 1) + ' 条边引用了不存在的点（' + a + ' / ' + b + '）');
+      if (a === b) throw new Error('第 ' + (i + 1) + ' 条边两端是同一个点');
+      return {
+        a: a, b: b,
+        initial: dirStrict(e.initial, '第 ' + (i + 1) + ' 条边的 initial'),
+        target: dirStrict(e.target, '第 ' + (i + 1) + ' 条边的 target')
+      };
+    });
+
+    return {
+      id: (raw.id === undefined || raw.id === null) ? '' : String(raw.id).trim(),
+      name: cut(raw.name, 60) || fallbackName || '导入关卡',
+      description: cut(raw.description, 240),
+      vertices: vertices,
+      edges: edges
+    };
+  }
+
+  // 保证 id 不与任何已有（含内置）关卡冲突——id 撞了会串进度存档
+  function uniqueLevelId(id) {
+    var used = Object.create(null);
+    BUILTIN.concat(externalLevels, userLevels).forEach(function (lv) { used[lv.id] = 1; });
+    var base = id || ('user-' + Date.now().toString(36));
+    var out = base, n = 2;
+    while (used[out]) { out = base + '-' + n; n++; }
+    return out;
+  }
+
+  function readUserLevels() {
+    var raw = store.get(USER_KEY);
+    if (!raw) return [];
+    var data;
+    try { data = JSON.parse(raw); } catch (e) { return []; }
+    var list = Array.isArray(data) ? data : (data && Array.isArray(data.levels) ? data.levels : []);
+    var out = [], used = Object.create(null);
+    list.forEach(function (lv, i) {
+      var clean;
+      try { clean = normalizeImportedLevel(lv, '导入关卡 ' + (i + 1)); } catch (e) { return; }
+      if (!clean.id) clean.id = 'user-' + (i + 1);
+      while (used[clean.id]) clean.id = clean.id + '-2';
+      used[clean.id] = 1;
+      out.push(clean);
+    });
+    return out;
+  }
+
+  function persistUserLevels() {
+    return store.set(USER_KEY, JSON.stringify({ v: 1, levels: userLevels }));
+  }
+
+  // 文本 -> 关卡（供文件选择与调试钩子共用）
+  function importLevelsFromText(text, fileName) {
+    var data;
+    try {
+      data = JSON.parse(String(text).replace(/^\uFEFF/, ''));
+    } catch (e) {
+      reportImport('导入失败：不是合法的 JSON（' + e.message + '）', true);
+      return { ok: false, reason: 'json', error: e.message };
+    }
+
+    var list = null;
+    if (Array.isArray(data)) list = data;
+    else if (data && Array.isArray(data.levels)) list = data.levels;
+    else if (data && typeof data === 'object' && Array.isArray(data.vertices) && Array.isArray(data.edges)) list = [data];
+    if (!list || !list.length) {
+      reportImport('导入失败：文件里没有关卡。应为关卡对象、关卡数组，或 { "levels": [ ... ] }', true);
+      return { ok: false, reason: 'shape' };
+    }
+
+    var base = String(fileName || 'imported.json').replace(/^.*[\\/]/, '').replace(/\.json$/i, '') || 'imported';
+    var backup = userLevels.slice();
+    var added = 0, replaced = 0, failed = [], touched = [];
+
+    list.forEach(function (raw, i) {
+      var lv;
+      try {
+        lv = normalizeImportedLevel(raw, list.length > 1 ? base + ' #' + (i + 1) : base);
+      } catch (e) {
+        failed.push('第 ' + (i + 1) + ' 个：' + e.message);
+        return;
+      }
+      // 同 id 视为"更新已导入的关卡"：重新导入改过的文件不会堆出重复项
+      var at = -1;
+      if (lv.id) {
+        for (var k = 0; k < userLevels.length; k++) if (userLevels[k].id === lv.id) { at = k; break; }
+      }
+      if (at >= 0) {
+        userLevels[at] = lv;
+        replaced++;
+        touched.push(lv.id);
+      } else {
+        lv.id = uniqueLevelId(lv.id);
+        userLevels.push(lv);
+        added++;
+        touched.push(lv.id);
+      }
+    });
+
+    if (!added && !replaced) {
+      console.warn('[import] 全部失败：', failed);
+      reportImport('导入失败：' + (failed[0] || '文件里没有可用关卡'), true);
+      return { ok: false, reason: 'invalid', failed: failed };
+    }
+
+    if (!persistUserLevels()) {
+      userLevels = backup;                 // 落盘失败就回滚，不能"看着成功、刷新就没了"
+      reportImport('导入失败：无法写入浏览器本地存储（可能是隐私模式或空间已满）', true);
+      rebuildLevels();
+      return { ok: false, reason: 'storage' };
+    }
+
+    var curId = LEVEL ? LEVEL.id : null;
+    rebuildLevels();
+
+    // 当前关可能被"更新"了：数据变了就重载棋盘（会清空本关历史）
+    var newCur = -1;
+    for (var j = 0; j < LEVELS.length; j++) if (LEVELS[j].id === curId) { newCur = j; break; }
+    if (newCur >= 0) {
+      levelIndex = newCur;
+      if (touched.indexOf(curId) >= 0) loadLevel(newCur);
+    }
+    if ($('levelMask').classList.contains('show')) openLevelList();
+
+    var parts = [];
+    if (added) parts.push('新增 ' + added + ' 个');
+    if (replaced) parts.push('更新 ' + replaced + ' 个');
+    if (failed.length) parts.push(failed.length + ' 个失败');
+    var msg = '已导入自定义关卡：' + parts.join('，')
+      + (failed.length ? '（' + failed[0] + '）' : '')
+      + '。当前共 ' + userLevels.length + ' 个自定义关卡。';
+    reportImport(msg, false);             // 放在 openLevelList 之后：它会先清空提示
+    console.info('[import] added=' + added + ' replaced=' + replaced + ' failed=' + JSON.stringify(failed));
+
+    return { ok: true, added: added, replaced: replaced, failed: failed, total: userLevels.length };
+  }
+
+  // 读用户选的文件
+  function readLevelFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () { importLevelsFromText(reader.result, file.name); };
+    reader.onerror = function () { showToast('读取文件失败：' + file.name, 4200); };
+    reader.readAsText(file, 'utf-8');
   }
 
   /* =========================================================
@@ -1263,7 +1661,7 @@
 
     renderHistory();
 
-    if (G.solved && !wasSolved) {
+    if (G.solved && !wasSolved && !quietWin) {
       $('winSub').textContent = '用了 ' + G.cursor + ' 步完成本关';
       showWinCard();
     } else if (!G.solved && wasSolved) {
@@ -1274,6 +1672,8 @@
     if (!G.solved && legalVertices().length === 0) {
       showToast('已无合法点击（所有点入度都大于 0）· 按 U 回退或 R 重开', 3200);
     }
+
+    saveSession();   // 局面每变一次就落盘，下次打开自动恢复
   }
 
   function renderHistory() {
@@ -1791,6 +2191,10 @@
       return;
     }
 
+    // 带 Ctrl / Cmd 的组合键交给浏览器：Ctrl+R 刷新、Ctrl+U 源码、
+    // Ctrl+加减 页面缩放、Cmd+方向键等，都不该被游戏快捷键吃掉
+    if (e.ctrlKey || e.metaKey) return;
+
     var k = e.key;
     if (k === 'Backspace' || k === 'u' || k === 'U') {
       e.preventDefault();
@@ -1868,20 +2272,29 @@
 
   /* ---------- 玩法说明 ---------- */
   var TUT_KEY = 'reverseGraph.tutorial.v1';
-  var store = {
-    get: function (k) {
-      try { return window.localStorage.getItem(k); } catch (e) { return null; }
-    },
-    set: function (k, v) {
-      try { window.localStorage.setItem(k, v); } catch (e) { /* file:// 下可能不可用 */ }
-    }
-  };
   function markTutorialSeen() { store.set(TUT_KEY, '1'); }
   function openTutorial() { showMask($('tutMask')); }
 
   /* ---------- 关卡选择 ---------- */
+  // 导入结果：列表开着就写在列表内，列表关着才用底部提示条（不要同一个消息提示两遍）
+  function reportImport(text, isErr) {
+    setLvMsg(text, isErr);
+    if (!$('levelMask').classList.contains('show')) showToast(text, isErr ? 5400 : 3400);
+  }
+
+  function setLvMsg(text, isErr) {
+    var el = $('lvMsg');
+    if (!el) return;
+    if (!text) { el.hidden = true; el.textContent = ''; el.className = 'lv-msg'; return; }
+    el.hidden = false;
+    el.textContent = text;
+    el.className = 'lv-msg' + (isErr ? ' err' : '');
+  }
+
   function openLevelList() {
     var box = $('lvList');
+    $('lvSub').textContent = levelSubNote();
+    setLvMsg('');
     box.innerHTML = '';
     if (!LEVELS.length) {
       var empty = document.createElement('div');
@@ -1901,6 +2314,12 @@
       nm.className = 'name';
       nm.textContent = lv.name || ('关卡 ' + (i + 1));
       top.appendChild(nm);
+      if (userLevels.indexOf(lv) >= 0) {
+        var ub = document.createElement('span');
+        ub.className = 'badge user';
+        ub.textContent = '自定义';
+        top.appendChild(ub);
+      }
       if (i === levelIndex) {
         var bd = document.createElement('span');
         bd.className = 'badge';
@@ -1962,6 +2381,15 @@
     hideMask($('tutMask'));
   });
   $('levelCancel').addEventListener('click', function () { hideMask($('levelMask')); });
+  $('btnImport').addEventListener('click', function () {
+    var inp = $('levelFile');
+    inp.value = '';        // 清空，允许连续导入同一个文件
+    inp.click();
+  });
+  $('levelFile').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    if (f) readLevelFile(f);
+  });
   $('winAgain').addEventListener('click', function () { hideWinCard(); resetBoard(); });
   $('winClose').addEventListener('click', hideWinCard);
   $('modalCancel').addEventListener('click', closeConfirm);
@@ -2014,13 +2442,28 @@
   });
 
   resize();
-  loadLevel(0);
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frame);       // 先跑渲染循环，加载期间也不黑屏
 
-  // 初次进入：弹玩法说明（看过一次就不再自动弹，可用标题卡上的「玩法」重新打开）
-  if (store.get(TUT_KEY) !== '1') {
-    setTimeout(openTutorial, 150);
-  }
+  // 用户导入的关卡（localStorage）先就位，否则上次玩的若是自定义关卡会恢复不到
+  userLevels = readUserLevels();
+  rebuildLevels();
+
+  // 外部关卡 -> 恢复上次进度（没有则从第一关开始）
+  loadExternalLevels().then(function () {
+    var info = null;
+    var saved = readSession();
+    if (saved) info = restoreSession(saved);
+    if (!info) loadLevel(0);
+
+    if (info && info.dropped > 0) {
+      showToast('已恢复「' + info.name + '」，但 ' + info.dropped + ' 步因关卡变动被丢弃', 4200);
+    } else if (info && info.steps > 0) {
+      showToast('已恢复上次进度：' + info.name + ' · 第 ' + info.steps + ' 步', 2600);
+    }
+
+    // 初次进入：弹玩法说明（看过一次就不再自动弹，可用标题卡上的「玩法」重新打开）
+    if (store.get(TUT_KEY) !== '1') setTimeout(openTutorial, 150);
+  });
 
   // 调试钩子：便于自动化测试 / 将来的关卡编辑器直接读写运行时状态
   window.RG = {
@@ -2031,6 +2474,22 @@
     loadLevel: loadLevel,
     loadLevelObject: buildLevel,
     dirFrom: dirFrom,
+    external: function () { return externalInfo; },
+    userLevels: function () { return userLevels; },
+    importText: importLevelsFromText,
+    normalizeImportedLevel: normalizeImportedLevel,
+    levelSubNote: levelSubNote,
+    clearUserLevels: function () {
+      userLevels = [];
+      persistUserLevels();
+      rebuildLevels();
+    },
+    session: {
+      key: SESSION_KEY,
+      save: saveSession,
+      read: readSession,
+      restore: restoreSession
+    },
     doMove: doMove, undo: undo, redo: redo, reset: resetBoard,
     fitView: fitView, legal: legalVertices, wrong: wrongCount,
     refresh: afterChange, winnable: isWinnable,

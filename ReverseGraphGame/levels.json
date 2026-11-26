@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "levels": [
+    {
+      "id": "custom-01-bowtie",
+      "name": "自定义示例 · 双簇回廊",
+      "version": 1,
+      "description": "从 levels.json 读入的自定义关卡：6 个点 7 条边，开局 4 条边方向错误，最短 6 步。",
+      "vertices": [
+        { "id": "P", "label": "P", "x": 210, "y": 150 },
+        { "id": "Q", "label": "Q", "x": 520, "y": 110 },
+        { "id": "R", "label": "R", "x": 810, "y": 170 },
+        { "id": "S", "label": "S", "x": 230, "y": 430 },
+        { "id": "T", "label": "T", "x": 545, "y": 380 },
+        { "id": "U", "label": "U", "x": 790, "y": 560 }
+      ],
+      "edges": [
+        { "a": "P", "b": "Q", "initial": 1, "target": 0 },
+        { "a": "Q", "b": "R", "initial": 1, "target": 0 },
+        { "a": "P", "b": "S", "initial": 0, "target": 0 },
+        { "a": "Q", "b": "T", "initial": 0, "target": 0 },
+        { "a": "S", "b": "T", "initial": 1, "target": 0 },
+        { "a": "T", "b": "U", "initial": 1, "target": 0 },
+        { "a": "R", "b": "U", "initial": 0, "target": 0 }
+      ]
+    }
+  ]
+}
